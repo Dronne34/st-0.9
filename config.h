@@ -5,8 +5,19 @@
  *
  * font: see http://freedesktop.org/software/fontconfig/fontconfig-user.html
  */
-static char *font = "Hack:style=Regular:pixelsize=14";
-static int borderpx = 1;
+static char *font = "Hack:pixelsize=15:antialias=true:autohint=true";
+/* Spare fonts */
+static char *font2[] = {
+/*	"Inconsolata for Powerline:pixelsize=12:antialias=true:autohint=true", */
+"Hack Nerd Font Mono:pixelsize=15:antialias=true:autohint=true", 
+};
+
+
+static int borderpx = 2;
+
+/* modkey options: ControlMask, ShiftMask or XK_ANY_MOD */
+static uint url_opener_modkey = XK_ANY_MOD;
+static char *url_opener = "xdg-open";
 
 /*
  * What program is execed by st depends of these precedence rules:
@@ -56,6 +67,7 @@ int allowwindowops = 0;
 static double minlatency = 8;
 static double maxlatency = 33;
 
+
 /*
  * blinking timeout (set to 0 to disable blinking) for the terminal blinking
  * attribute.
@@ -66,6 +78,7 @@ static unsigned int blinktimeout = 800;
  * thickness of underline and bar cursors
  */
 static unsigned int cursorthickness = 2;
+
 
 /*
  * bell volume. It must be a value between -100 and 100. Use 0 for disabling
@@ -93,57 +106,50 @@ char *termname = "st-256color";
  */
 unsigned int tabspaces = 8;
 
+/* bg opacity */
+float alpha = 0.9;
+
 /* Terminal colors (16 first used in escape sequence) */
 static const char *colorname[] = {
-   /* 8 normal colors */
-   [0] = "#000000", /* black   */
-   [1] = "#ff5555", /* red     */
-   [2] = "#50fa7b", /* green   */
-   [3] = "#f1fa8c", /* yellow  */
-   [4] = "#bd93f9", /* blue    */
-   [5] = "#ff79c6", /* magenta */
-   [6] = "#8be9fd", /* cyan    */
-   [7] = "#bbbbbb", /* white   */
-                                 
-   /* 8 bright colors */
-   [8]  = "#44475a", /* black   */
-   [9]  = "#ff5555", /* red     */
-   [10] = "#50fa7b", /* green   */
-   [11] = "#f1fa8c", /* yellow  */
-   [12] = "#bd93f9", /* blue    */
-   [13] = "#ff79c6", /* magenta */
-   [14] = "#8be9fd", /* cyan    */
-   [15] = "#ffffff", /* white   */
-                                  
-   /* special colors */
-   [256] = "#282a36", /* background */
-   [257] = "#f8f8f2", /* foreground */
+	/* 8 normal colors */
+	"black",
+	"red3",
+	"green3",
+	"yellow3",
+	"blue2",
+	"magenta3",
+	"cyan3",
+	"gray90",
+
+	/* 8 bright colors */
+	"gray50",
+	"red",
+	"green",
+	"yellow",
+	"#5c5cff",
+	"magenta",
+	"cyan",
+	"white",
+
 	[255] = 0,
 
 	/* more colors can be added after 255 to use with DefaultXX */
-	"#373B48",
-	"#FFFFFF",
-	"gray90", /* default foreground colour */
-	"#20232B", /* default background colour */
+	"#add8e6", /* 256 -> cursor */
+	"#555555", /* 257 -> rev cursor*/
+	"#292F37", /* 258 -> bg */
+	"#e5e5e5", /* 259 -> fg */
 };
 
 
 /*
  * Default colors (colorname index)
- * foreground, background, cursor
+ * foreground, background, cursor, reverse cursor
  */
-unsigned int defaultfg = 257;
-unsigned int defaultbg = 256;
-unsigned int defaultcs = 257;
-static unsigned int defaultrcs = 257;
+unsigned int defaultbg = 258;
+unsigned int defaultfg = 259;
+unsigned int defaultcs = 256;
+unsigned int defaultrcs = 257;
 
-/*
- * Colors used, when the specific fg == defaultfg. So in reverse mode this
- * will reverse too. Another logic would only make the simple feature too
- * complex.
- */
-unsigned int defaultitalic = 7;
-unsigned int defaultunderline = 7;
 
 /*
  * Default shape of cursor
@@ -151,8 +157,7 @@ unsigned int defaultunderline = 7;
  * 4: Underline ("_")
  * 6: Bar ("|")
  * 7: Snowman ("☃")
- */
-static unsigned int cursorshape = 4;
+ */static unsigned int cursorshape = 6;
 
 /*
  * Default columns and rows numbers
@@ -174,6 +179,7 @@ static unsigned int mousebg = 0;
  */
 static unsigned int defaultattr = 11;
 
+
 /*
  * Force mouse select/shortcuts while mask is active (when MODE_MOUSE is set).
  * Note that if you want to use ShiftMask with selmasks, set this to an other
@@ -186,32 +192,48 @@ static uint forcemousemod = ShiftMask;
  * Beware that overloading Button1 will disable the selection.
  */
 static MouseShortcut mshortcuts[] = {
-	/* mask                 button   function        argument       release */
+	/* mask                 button   function        argument               release  screen */
 	{ XK_ANY_MOD,           Button2, selpaste,       {.i = 0},      1 },
 	{ ShiftMask,            Button4, ttysend,        {.s = "\033[5;2~"} },
-	{ XK_ANY_MOD,           Button4, ttysend,        {.s = "\031"} },
 	{ ShiftMask,            Button5, ttysend,        {.s = "\033[6;2~"} },
-	{ XK_ANY_MOD,           Button5, ttysend,        {.s = "\005"} },
+	{ XK_NO_MOD,            Button4, kscrollup,      {.i = 5},      0, S_PRI },
+	{ XK_NO_MOD,            Button5, kscrolldown,    {.i = 5},      0, S_PRI },
+	{ XK_ANY_MOD,           Button4, ttysend,        {.s = "\031"}, 0, S_ALT },
+	{ XK_ANY_MOD,           Button5, ttysend,        {.s = "\005"}, 0, S_ALT },
 };
 
 /* Internal keyboard shortcuts. */
 #define MODKEY Mod1Mask
 #define TERMMOD (ControlMask|ShiftMask)
 
+static char *openurlcmd[] = { "/bin/sh", "-c",
+	"xurls | dmenu -l 10 -w $WINDOWID | xargs -r open",
+	"externalpipe", NULL };
+
+static char *setbgcolorcmd[] = { "/bin/sh", "-c",
+	"printf '\033]11;#008000\007'",
+	"externalpipein", NULL };
+
 static Shortcut shortcuts[] = {
-	/* mask                 keysym          function        argument */
-	{ XK_ANY_MOD,           XK_Break,       sendbreak,      {.i =  0} },
-	{ ControlMask,          XK_Print,       toggleprinter,  {.i =  0} },
-	{ ShiftMask,            XK_Print,       printscreen,    {.i =  0} },
-	{ XK_ANY_MOD,           XK_Print,       printsel,       {.i =  0} },
-	{ TERMMOD,              XK_Prior,       zoom,           {.f = +1} },
-	{ TERMMOD,              XK_Next,        zoom,           {.f = -1} },
-	{ TERMMOD,              XK_Home,        zoomreset,      {.f =  0} },
-	{ TERMMOD,              XK_C,           clipcopy,       {.i =  0} },
-	{ TERMMOD,              XK_V,           clippaste,      {.i =  0} },
-	{ TERMMOD,              XK_Y,           selpaste,       {.i =  0} },
-	{ ShiftMask,            XK_Insert,      selpaste,       {.i =  0} },
-	{ TERMMOD,              XK_Num_Lock,    numlock,        {.i =  0} },
+	/* mask                 keysym          function         argument   screen */
+	{ XK_ANY_MOD,           XK_Break,       sendbreak,       {.i =  0} },
+	{ ControlMask,          XK_Print,       toggleprinter,   {.i =  0} },
+	{ ShiftMask,            XK_Print,       printscreen,     {.i =  0} },
+	{ XK_ANY_MOD,           XK_Print,       printsel,        {.i =  0} },
+	{ TERMMOD,              XK_Prior,       zoom,            {.f = +1} },
+	{ TERMMOD,              XK_Next,        zoom,            {.f = -1} },
+	{ TERMMOD,              XK_Home,        zoomreset,       {.f =  0} },
+	{ TERMMOD,              XK_C,           clipcopy,        {.i =  0} },
+	{ TERMMOD,              XK_V,           clippaste,       {.i =  0} },
+	{ TERMMOD,              XK_O,           changealpha,     {.f = +0.05} },
+	{ TERMMOD,              XK_P,           changealpha,     {.f = -0.05} },
+	{ XK_NO_MOD,            XK_F11,         fullscreen,      {.i =  0} },
+	{ MODKEY,               XK_Return,      fullscreen,      {.i =  0} },
+	{ ShiftMask,            XK_Page_Up,     kscrollup,       {.i = -1}, S_PRI },
+	{ ShiftMask,            XK_Page_Down,   kscrolldown,     {.i = -1}, S_PRI },
+	{ TERMMOD,              XK_Y,           selpaste,        {.i =  0} },
+	{ ShiftMask,            XK_Insert,      selpaste,        {.i =  0} },
+	{ TERMMOD,              XK_Num_Lock,    numlock,         {.i =  0} },
 };
 
 /*
@@ -289,7 +311,7 @@ static Key key[] = {
 	{ XK_KP_Delete,     ControlMask,    "\033[3;5~",    +1,    0},
 	{ XK_KP_Delete,     ShiftMask,      "\033[2K",      -1,    0},
 	{ XK_KP_Delete,     ShiftMask,      "\033[3;2~",    +1,    0},
-	{ XK_KP_Delete,     XK_ANY_MOD,     "\033[P",       -1,    0},
+	{ XK_KP_Delete,     XK_ANY_MOD,     "\033[3~",      -1,    0},
 	{ XK_KP_Delete,     XK_ANY_MOD,     "\033[3~",      +1,    0},
 	{ XK_KP_Multiply,   XK_ANY_MOD,     "\033Oj",       +2,    0},
 	{ XK_KP_Add,        XK_ANY_MOD,     "\033Ok",       +2,    0},
@@ -357,7 +379,7 @@ static Key key[] = {
 	{ XK_Delete,        ControlMask,    "\033[3;5~",    +1,    0},
 	{ XK_Delete,        ShiftMask,      "\033[2K",      -1,    0},
 	{ XK_Delete,        ShiftMask,      "\033[3;2~",    +1,    0},
-	{ XK_Delete,        XK_ANY_MOD,     "\033[P",       -1,    0},
+	{ XK_Delete,        XK_ANY_MOD,     "\033[3~",      -1,    0},
 	{ XK_Delete,        XK_ANY_MOD,     "\033[3~",      +1,    0},
 	{ XK_BackSpace,     XK_NO_MOD,      "\177",          0,    0},
 	{ XK_BackSpace,     Mod1Mask,       "\033\177",      0,    0},
@@ -483,3 +505,5 @@ static char ascii_printable[] =
 	" !\"#$%&'()*+,-./0123456789:;<=>?"
 	"@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_"
 	"`abcdefghijklmnopqrstuvwxyz{|}~";
+
+
