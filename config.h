@@ -137,7 +137,7 @@ static const ColorScheme schemes[] = {
 
 	// One Half dark
 	{{"#333B4A", "#e06c75", "#98c379", "#e5c07b",
-	  "#61afef", "#c678dd", "#56b6c2", "#dcdfe4",
+	  "#98c379", "#c678dd", "#56b6c2", "#dcdfe4",
 	  "#282c34", "#e06c75", "#98c379", "#e5c07b",
 	  "#61afef", "#c678dd", "#56b6c2", "#dcdfe4",
 	  [256]="#cccccc", "#555555"}, 7, 0, 256, 257},
