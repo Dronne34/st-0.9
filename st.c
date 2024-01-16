@@ -20,9 +20,6 @@
 #include "st.h"
 #include "win.h"
 
-
-
-
 #if   defined(__linux)
  #include <pty.h>
 #elif defined(__OpenBSD__) || defined(__NetBSD__) || defined(__APPLE__)
@@ -40,11 +37,11 @@
 #define STR_ARG_SIZ   ESC_ARG_SIZ
 
 /* macros */
-#define IS_SET(flag)    ((term.mode & (flag)) != 0)
-#define ISCONTROLC0(c)  (BETWEEN(c, 0, 0x1f) || (c) == 0x7f)
-#define ISCONTROLC1(c)  (BETWEEN(c, 0x80, 0x9f))
-#define ISCONTROL(c)    (ISCONTROLC0(c) || ISCONTROLC1(c))
-#define ISDELIM(u)      (u && wcschr(worddelimiters, u))
+#define IS_SET(flag)		((term.mode & (flag)) != 0)
+#define ISCONTROLC0(c)		(BETWEEN(c, 0, 0x1f) || (c) == 0x7f)
+#define ISCONTROLC1(c)		(BETWEEN(c, 0x80, 0x9f))
+#define ISCONTROL(c)		(ISCONTROLC0(c) || ISCONTROLC1(c))
+#define ISDELIM(u)		(u && wcschr(worddelimiters, u))
 
 enum term_mode {
 	MODE_WRAP        = 1 << 0,
@@ -88,6 +85,13 @@ enum escape_state {
 };
 
 typedef struct {
+	Glyph attr; /* current char attributes */
+	int x;
+	int y;
+	char state;
+} TCursor;
+
+typedef struct {
 	int mode;
 	int type;
 	int snap;
@@ -104,6 +108,27 @@ typedef struct {
 
 	int alt;
 } Selection;
+
+/* Internal representation of the screen */
+typedef struct {
+	int row;      /* nb row */
+	int col;      /* nb col */
+	Line *line;   /* screen */
+	Line *alt;    /* alternate screen */
+	int *dirty;   /* dirtyness of lines */
+	TCursor c;    /* cursor */
+	int ocx;      /* old cursor col */
+	int ocy;      /* old cursor row */
+	int top;      /* top    scroll limit */
+	int bot;      /* bottom scroll limit */
+	int mode;     /* terminal mode flags */
+	int esc;      /* escape state flags */
+	char trantbl[4]; /* charset table translation */
+	int charset;  /* current charset */
+	int icharset; /* selected charset for sequence */
+	int *tabs;
+	Rune lastc;   /* last printed char outside of sequence, 0 if control */
+} Term;
 
 /* CSI Escape sequence structs */
 /* ESC '[' [[ [<priv>] <arg> [;]] <mode> [<mode>]] */
@@ -136,8 +161,7 @@ static void csidump(void);
 static void csihandle(void);
 static void csiparse(void);
 static void csireset(void);
-static void osc4_color_response(int num);
-static void osc_color_response(int index, int num);
+static void osc_color_response(int, int, int);
 static int eschandle(uchar);
 static void strdump(void);
 static void strhandle(void);
@@ -161,7 +185,7 @@ static void tnewline(int);
 static void tputtab(int);
 static void tputc(Rune);
 static void treset(void);
-static void tscrollup(int, int, int);
+static void tscrollup(int, int);
 static void tscrolldown(int, int);
 static void tsetattr(const int *, int);
 static void tsetchar(Rune, const Glyph *, int, int);
@@ -170,12 +194,16 @@ static void tsetscroll(int, int);
 static void tswapscreen(void);
 static void tsetmode(int, int, const int *, int);
 static int twrite(const char *, int, int);
+static void tfulldirt(void);
 static void tcontrolcode(uchar );
 static void tdectest(char );
 static void tdefutf8(char);
 static int32_t tdefcolor(const int *, int *, int);
 static void tdeftran(char);
 static void tstrsequence(uchar);
+
+static void drawregion(int, int, int, int);
+
 static void selnormalize(void);
 static void selscroll(int, int);
 static void selsnap(int *, int *, int);
@@ -191,6 +219,7 @@ static char base64dec_getc(const char **);
 static ssize_t xwrite(int, const char *, size_t);
 
 /* Globals */
+static Term term;
 static Selection sel;
 static CSIEscape csiescseq;
 static STREscape strescseq;
@@ -202,9 +231,6 @@ static const uchar utfbyte[UTF_SIZ + 1] = {0x80,    0, 0xC0, 0xE0, 0xF0};
 static const uchar utfmask[UTF_SIZ + 1] = {0xC0, 0x80, 0xE0, 0xF0, 0xF8};
 static const Rune utfmin[UTF_SIZ + 1] = {       0,    0,  0x80,  0x800,  0x10000};
 static const Rune utfmax[UTF_SIZ + 1] = {0x10FFFF, 0x7F, 0x7FF, 0xFFFF, 0x10FFFF};
-
-
-#include "patch/st_include.h"
 
 ssize_t
 xwrite(int fd, const char *s, size_t len)
@@ -247,6 +273,7 @@ char *
 xstrdup(const char *s)
 {
 	char *p;
+
 	if ((p = strdup(s)) == NULL)
 		die("strdup: %s\n", strerror(errno));
 
@@ -382,15 +409,14 @@ tlinelen(int y)
 {
 	int i = term.col;
 
-	if (TLINE(y)[i - 1].mode & ATTR_WRAP)
+	if (term.line[y][i - 1].mode & ATTR_WRAP)
 		return i;
 
-	while (i > 0 && TLINE(y)[i - 1].u == ' ')
- 		--i;
+	while (i > 0 && term.line[y][i - 1].u == ' ')
+		--i;
 
 	return i;
 }
-
 
 void
 selstart(int col, int row, int snap)
@@ -495,7 +521,7 @@ selsnap(int *x, int *y, int direction)
 		 * Snap around if the word wraps around at the end or
 		 * beginning of a line.
 		 */
-		prevgp = &TLINE(*y)[*x];
+		prevgp = &term.line[*y][*x];
 		prevdelim = ISDELIM(prevgp->u);
 		for (;;) {
 			newx = *x + direction;
@@ -510,14 +536,14 @@ selsnap(int *x, int *y, int direction)
 					yt = *y, xt = *x;
 				else
 					yt = newy, xt = newx;
-				if (!(TLINE(yt)[xt].mode & ATTR_WRAP))
+				if (!(term.line[yt][xt].mode & ATTR_WRAP))
 					break;
 			}
 
 			if (newx >= tlinelen(newy))
 				break;
 
-			gp = &TLINE(newy)[newx];
+			gp = &term.line[newy][newx];
 			delim = ISDELIM(gp->u);
 			if (!(gp->mode & ATTR_WDUMMY) && (delim != prevdelim
 					|| (delim && gp->u != prevgp->u)))
@@ -538,15 +564,15 @@ selsnap(int *x, int *y, int direction)
 		*x = (direction < 0) ? 0 : term.col - 1;
 		if (direction < 0) {
 			for (; *y > 0; *y += direction) {
-				if (!(TLINE(*y-1)[term.col-1].mode & ATTR_WRAP))
-				{
+				if (!(term.line[*y-1][term.col-1].mode
+						& ATTR_WRAP)) {
 					break;
 				}
 			}
 		} else if (direction > 0) {
 			for (; *y < term.row-1; *y += direction) {
-				if (!(TLINE(*y)[term.col-1].mode & ATTR_WRAP))
-				{
+				if (!(term.line[*y][term.col-1].mode
+						& ATTR_WRAP)) {
 					break;
 				}
 			}
@@ -569,21 +595,20 @@ getsel(void)
 	ptr = str = xmalloc(bufsize);
 
 	/* append every set & selected glyph to the selection */
-	for (y = sel.nb.y; y <= sel.ne.y; y++)
-	{
+	for (y = sel.nb.y; y <= sel.ne.y; y++) {
 		if ((linelen = tlinelen(y)) == 0) {
 			*ptr++ = '\n';
 			continue;
 		}
 
 		if (sel.type == SEL_RECTANGULAR) {
-			gp = &TLINE(y)[sel.nb.x];
+			gp = &term.line[y][sel.nb.x];
 			lastx = sel.ne.x;
 		} else {
-			gp = &TLINE(y)[sel.nb.y == y ? sel.nb.x : 0];
+			gp = &term.line[y][sel.nb.y == y ? sel.nb.x : 0];
 			lastx = (sel.ne.y == y) ? sel.ne.x : term.col-1;
 		}
-		last = &TLINE(y)[MIN(lastx, linelen-1)];
+		last = &term.line[y][MIN(lastx, linelen-1)];
 		while (last >= gp && last->u == ' ')
 			--last;
 
@@ -603,9 +628,8 @@ getsel(void)
 		 * st.
 		 * FIXME: Fix the computer world.
 		 */
-		if (
-			(y < sel.ne.y || lastx >= linelen)
-		    && (!(last->mode & ATTR_WRAP) || sel.type == SEL_RECTANGULAR))
+		if ((y < sel.ne.y || lastx >= linelen) &&
+		    (!(last->mode & ATTR_WRAP) || sel.type == SEL_RECTANGULAR))
 			*ptr++ = '\n';
 	}
 	*ptr = 0;
@@ -673,7 +697,6 @@ execsh(char *cmd, char **args)
 	setenv("SHELL", sh, 1);
 	setenv("HOME", pw->pw_dir, 1);
 	setenv("TERM", termname, 1);
-	setenv("COLORTERM", "truecolor", 1);
 
 	signal(SIGCHLD, SIG_DFL);
 	signal(SIGHUP, SIG_DFL);
@@ -697,7 +720,6 @@ sigchld(int a)
 
 	if (pid != p)
 		return;
-
 
 	if (WIFEXITED(stat) && WEXITSTATUS(stat))
 		die("child exited with status %d\n", WEXITSTATUS(stat));
@@ -772,7 +794,7 @@ ttynew(const char *line, char *cmd, const char *out, char **args)
 		if (ioctl(s, TIOCSCTTY, NULL) < 0)
 			die("ioctl TIOCSCTTY failed: %s\n", strerror(errno));
 		if (s > 2)
-				close(s);
+			close(s);
 #ifdef __OpenBSD__
 		if (pledge("stdio getpw proc exec", NULL) == -1)
 			die("pledge\n");
@@ -822,9 +844,6 @@ void
 ttywrite(const char *s, size_t n, int may_echo)
 {
 	const char *next;
-	Arg arg = (Arg) { .i = term.scr };
-
-	kscrolldown(&arg);
 
 	if (may_echo && IS_SET(MODE_ECHO))
 		twrite(s, n, 1);
@@ -941,12 +960,6 @@ tattrset(int attr)
 	return 0;
 }
 
-int
-tisaltscr(void)
-{
-	return IS_SET(MODE_ALTSCREEN);
-}
-
 void
 tsetdirt(int top, int bot)
 {
@@ -1044,8 +1057,6 @@ tswapscreen(void)
 void
 tscrolldown(int orig, int n)
 {
-	restoremousecursor();
-
 	int i;
 	Line temp;
 
@@ -1060,33 +1071,16 @@ tscrolldown(int orig, int n)
 		term.line[i-n] = temp;
 	}
 
-
-	if (term.scr == 0)
-		selscroll(orig, n);
+	selscroll(orig, n);
 }
 
 void
-tscrollup(int orig, int n, int copyhist)
+tscrollup(int orig, int n)
 {
-	restoremousecursor();
-
 	int i;
 	Line temp;
 
 	LIMIT(n, 0, term.bot-orig+1);
-
-	if (copyhist && !IS_SET(MODE_ALTSCREEN)) {
-		for (i = 0; i < n; i++) {
-			term.histi = (term.histi + 1) % HISTSIZE;
-			temp = term.hist[term.histi];
-			term.hist[term.histi] = term.line[orig+i];
-			term.line[orig+i] = temp;
-		}
-		term.histn = MIN(term.histn + n, HISTSIZE);
-
-		if (term.scr > 0 && term.scr < HISTSIZE)
-			term.scr = MIN(term.scr + n, HISTSIZE-1);
-	}
 
 	tclearregion(0, orig, term.col-1, orig+n-1);
 	tsetdirt(orig+n, term.bot);
@@ -1097,15 +1091,13 @@ tscrollup(int orig, int n, int copyhist)
 		term.line[i+n] = temp;
 	}
 
-
-	if (term.scr == 0)
-		selscroll(orig, -n);
+	selscroll(orig, -n);
 }
 
 void
 selscroll(int orig, int n)
 {
-	if (sel.ob.x == -1)
+	if (sel.ob.x == -1 || sel.alt != IS_SET(MODE_ALTSCREEN))
 		return;
 
 	if (BETWEEN(sel.nb.y, orig, term.bot) != BETWEEN(sel.ne.y, orig, term.bot)) {
@@ -1128,13 +1120,12 @@ tnewline(int first_col)
 	int y = term.c.y;
 
 	if (y == term.bot) {
-		tscrollup(term.top, 1, 1);
+		tscrollup(term.top, 1);
 	} else {
 		y++;
 	}
 	tmoveto(first_col ? 0 : term.c.x, y);
 }
-
 
 void
 csiparse(void)
@@ -1224,7 +1215,6 @@ tsetchar(Rune u, const Glyph *attr, int x, int y)
 	term.dirty[y] = 1;
 	term.line[y][x] = *attr;
 	term.line[y][x].u = u;
-
 }
 
 void
@@ -1302,7 +1292,7 @@ void
 tdeleteline(int n)
 {
 	if (BETWEEN(term.c.y, term.top, term.bot))
-		tscrollup(term.c.y, n, 0);
+		tscrollup(term.c.y, n);
 }
 
 int32_t
@@ -1476,8 +1466,7 @@ tsetscroll(int t, int b)
 void
 tsetmode(int priv, int set, const int *args, int narg)
 {
-	int alt;
-	const int *lim;
+	int alt; const int *lim;
 
 	for (lim = args + narg; args < lim; ++args) {
 		if (priv) {
@@ -1548,7 +1537,8 @@ tsetmode(int priv, int set, const int *args, int narg)
 					break;
 				alt = IS_SET(MODE_ALTSCREEN);
 				if (alt) {
-					tclearregion(0, 0, term.col-1, term.row-1);
+					tclearregion(0, 0, term.col-1,
+							term.row-1);
 				}
 				if (set ^ alt) /* set is always 1 or 0 */
 					tswapscreen();
@@ -1606,9 +1596,8 @@ tsetmode(int priv, int set, const int *args, int narg)
 void
 csihandle(void)
 {
-	char buffer[40];
+	char buf[40];
 	int len;
-	int maxcol = term.col;
 
 	switch (csiescseq.mode[0]) {
 	default:
@@ -1706,49 +1695,19 @@ csihandle(void)
 	case 'J': /* ED -- Clear screen */
 		switch (csiescseq.arg[0]) {
 		case 0: /* below */
-			tclearregion(term.c.x, term.c.y, maxcol-1, term.c.y);
+			tclearregion(term.c.x, term.c.y, term.col-1, term.c.y);
 			if (term.c.y < term.row-1) {
-				tclearregion(0, term.c.y+1, maxcol-1,
+				tclearregion(0, term.c.y+1, term.col-1,
 						term.row-1);
 			}
 			break;
 		case 1: /* above */
 			if (term.c.y > 1)
-				tclearregion(0, 0, maxcol-1, term.c.y-1);
+				tclearregion(0, 0, term.col-1, term.c.y-1);
 			tclearregion(0, term.c.y, term.c.x, term.c.y);
 			break;
-		case 2: /* screen */
-			if (!IS_SET(MODE_ALTSCREEN)) {
-				kscrolldown(&((Arg){ .i = term.scr }));
-				int n, m, bot = term.bot;
-				term.bot = term.row-1;
-				for (n = term.row-1; n >= 0; n--) {
-					for (m = 0; m < maxcol && term.line[n][m].u == ' ' && !term.line[n][m].mode; m++);
-					if (m < maxcol) {
-						tscrollup(0, n+1, 1);
-						break;
-					}
-				}
-				if (n < term.row-1)
-					tclearregion(0, 0, maxcol-1, term.row-n-2);
-				term.bot = bot;
-				break;
-			}
-
-			tclearregion(0, 0, maxcol-1, term.row-1);
-
-			break;
-		case 3: /* scrollback */
-			if (!IS_SET(MODE_ALTSCREEN)) {
-				term.scr = 0;
-				term.histi = 0;
-				term.histn = 0;
-				Glyph g=(Glyph){.bg=term.c.attr.bg, .fg=term.c.attr.fg, .u=' ', .mode=0};
-				for (int i = 0; i < HISTSIZE; i++) {
-					for (int j = 0; j < maxcol; j++)
-						term.hist[i][j] = g;
-				}
-			}
+		case 2: /* all */
+			tclearregion(0, 0, term.col-1, term.row-1);
 			break;
 		default:
 			goto unknown;
@@ -1757,20 +1716,20 @@ csihandle(void)
 	case 'K': /* EL -- Clear line */
 		switch (csiescseq.arg[0]) {
 		case 0: /* right */
-			tclearregion(term.c.x, term.c.y, maxcol-1,
+			tclearregion(term.c.x, term.c.y, term.col-1,
 					term.c.y);
 			break;
 		case 1: /* left */
 			tclearregion(0, term.c.y, term.c.x, term.c.y);
 			break;
 		case 2: /* all */
-			tclearregion(0, term.c.y, maxcol-1, term.c.y);
+			tclearregion(0, term.c.y, term.col-1, term.c.y);
 			break;
 		}
 		break;
 	case 'S': /* SU -- Scroll <n> line up */
 		DEFAULT(csiescseq.arg[0], 1);
-		tscrollup(term.top, csiescseq.arg[0], 0);
+		tscrollup(term.top, csiescseq.arg[0]);
 		break;
 	case 'T': /* SD -- Scroll <n> line down */
 		DEFAULT(csiescseq.arg[0], 1);
@@ -1816,9 +1775,9 @@ csihandle(void)
 			ttywrite("\033[0n", sizeof("\033[0n") - 1, 0);
 			break;
 		case 6: /* Report Cursor Position (CPR) "<row>;<column>R" */
-			len = snprintf(buffer, sizeof(buffer), "\033[%i;%iR",
+			len = snprintf(buf, sizeof(buf), "\033[%i;%iR",
 			               term.c.y+1, term.c.x+1);
-			ttywrite(buffer, len, 0);
+			ttywrite(buf, len, 0);
 			break;
 		default:
 			goto unknown;
@@ -1884,39 +1843,28 @@ csireset(void)
 }
 
 void
-osc4_color_response(int num)
+osc_color_response(int num, int index, int is_osc4)
 {
 	int n;
 	char buf[32];
 	unsigned char r, g, b;
 
-	if (xgetcolor(num, &r, &g, &b)) {
-		fprintf(stderr, "erresc: failed to fetch osc4 color %d\n", num);
+	if (xgetcolor(is_osc4 ? num : index, &r, &g, &b)) {
+		fprintf(stderr, "erresc: failed to fetch %s color %d\n",
+		        is_osc4 ? "osc4" : "osc",
+		        is_osc4 ? num : index);
 		return;
 	}
 
-	n = snprintf(buf, sizeof buf, "\033]4;%d;rgb:%02x%02x/%02x%02x/%02x%02x\007",
-			num, r, r, g, g, b, b);
-
-	ttywrite(buf, n, 1);
-}
-
-void
-osc_color_response(int index, int num)
-{
-	int n;
-	char buf[32];
-	unsigned char r, g, b;
-
-	if (xgetcolor(index, &r, &g, &b)) {
-		fprintf(stderr, "erresc: failed to fetch osc color %d\n", index);
-		return;
+	n = snprintf(buf, sizeof buf, "\033]%s%d;rgb:%02x%02x/%02x%02x/%02x%02x\007",
+	             is_osc4 ? "4;" : "", num, r, r, g, g, b, b);
+	if (n < 0 || n >= sizeof(buf)) {
+		fprintf(stderr, "error: %s while printing %s response\n",
+		        n < 0 ? "snprintf failed" : "truncation occurred",
+		        is_osc4 ? "osc4" : "osc");
+	} else {
+		ttywrite(buf, n, 1);
 	}
-
-	n = snprintf(buf, sizeof buf, "\033]%d;rgb:%02x%02x/%02x%02x/%02x%02x\007",
-			num, r, r, g, g, b, b);
-
-	ttywrite(buf, n, 1);
 }
 
 void
@@ -1924,6 +1872,11 @@ strhandle(void)
 {
 	char *p = NULL, *dec;
 	int j, narg, par;
+	const struct { int idx; char *str; } osc_table[] = {
+		{ defaultfg, "foreground" },
+		{ defaultbg, "background" },
+		{ defaultcs, "cursor" }
+	};
 
 	term.esc &= ~(ESC_STR_END|ESC_STR);
 	strparse();
@@ -1957,65 +1910,35 @@ strhandle(void)
 				}
 			}
 			return;
-		case 8: /* Clear Hyperlinks */
-			return;
 		case 10:
-			if (narg < 2)
-				break;
-
-			p = strescseq.args[1];
-
-			if (!strcmp(p, "?"))
-				osc_color_response(defaultfg, 10);
-			else if (xsetcolorname(defaultfg, p))
-				fprintf(stderr, "erresc: invalid foreground color: %s\n", p);
-			else
-				tfulldirt();
-			return;
 		case 11:
-			if (narg < 2)
-				break;
-
-			p = strescseq.args[1];
-
-			if (!strcmp(p, "?"))
-				osc_color_response(defaultbg, 11);
-			else if (xsetcolorname(defaultbg, p))
-				fprintf(stderr, "erresc: invalid background color: %s\n", p);
-			else
-				tfulldirt();
-			return;
 		case 12:
 			if (narg < 2)
 				break;
-
 			p = strescseq.args[1];
+			if ((j = par - 10) < 0 || j >= LEN(osc_table))
+				break; /* shouldn't be possible */
 
-			if (!strcmp(p, "?"))
-				osc_color_response(defaultcs, 12);
-			else if (xsetcolorname(defaultcs, p))
-				fprintf(stderr, "erresc: invalid cursor color: %s\n", p);
-			else
+			if (!strcmp(p, "?")) {
+				osc_color_response(par, osc_table[j].idx, 0);
+			} else if (xsetcolorname(osc_table[j].idx, p)) {
+				fprintf(stderr, "erresc: invalid %s color: %s\n",
+				        osc_table[j].str, p);
+			} else {
 				tfulldirt();
+			}
 			return;
 		case 4: /* color set */
-			if ((par == 4 && narg < 3) || narg < 2)
+			if (narg < 3)
 				break;
-			p = strescseq.args[((par == 4) ? 2 : 1)];
+			p = strescseq.args[2];
 			/* FALLTHROUGH */
 		case 104: /* color reset */
-			if (par == 10)
-				j = defaultfg;
-			else if (par == 11)
-				j = defaultbg;
-			else if (par == 12)
-				j = defaultcs;
-			else
-				j = (narg > 1) ? atoi(strescseq.args[1]) : -1;
+			j = (narg > 1) ? atoi(strescseq.args[1]) : -1;
 
-			if (p && !strcmp(p, "?"))
-				osc4_color_response(j);
-			else if (xsetcolorname(j, p)) {
+			if (p && !strcmp(p, "?")) {
+				osc_color_response(j, 0, 1);
+			} else if (xsetcolorname(j, p)) {
 				if (par == 104 && narg <= 1) {
 					xloadcols();
 					return; /* color reset without parameter */
@@ -2023,8 +1946,10 @@ strhandle(void)
 				fprintf(stderr, "erresc: invalid color j=%d, p=%s\n",
 				        j, p ? p : "(null)");
 			} else {
-				if (j == defaultbg)
-					xclearwin();
+				/*
+				 * TODO if defaultbg color is changed, borders
+				 * are dirty
+				 */
 				tfulldirt();
 			}
 			return;
@@ -2227,7 +2152,6 @@ tdectest(char c)
 void
 tstrsequence(uchar c)
 {
-
 	switch (c) {
 	case 0x90:   /* DCS -- Device Control String */
 		c = 'P';
@@ -2245,28 +2169,6 @@ tstrsequence(uchar c)
 	strreset();
 	strescseq.type = c;
 	term.esc |= ESC_STR;
-}
-
-void
-tupdatebgcolor(int oldbg, int newbg)
-{
-	for (int y = 0; y < term.row; y++) {
-		for (int x = 0; x < term.col; x++) {
-			if (term.line[y][x].bg == oldbg)
-				term.line[y][x].bg = newbg;
-		}
-	}
-}
-
-void
-tupdatefgcolor(int oldfg, int newfg)
-{
-	for (int y = 0; y < term.row; y++) {
-		for (int x = 0; x < term.col; x++) {
-			if (term.line[y][x].fg == oldfg)
-				term.line[y][x].fg = newfg;
-		}
-	}
 }
 
 void
@@ -2403,7 +2305,7 @@ eschandle(uchar ascii)
 		return 0;
 	case 'D': /* IND -- Linefeed */
 		if (term.c.y == term.bot) {
-			tscrollup(term.top, 1, 1);
+			tscrollup(term.top, 1);
 		} else {
 			tmoveto(term.c.x, term.c.y+1);
 		}
@@ -2428,11 +2330,7 @@ eschandle(uchar ascii)
 		treset();
 		resettitle();
 		xloadcols();
-		if (!IS_SET(MODE_ALTSCREEN)) {
-			term.scr = 0;
-			term.histi = 0;
-			term.histn = 0;
-		}
+		xsetmode(0, MODE_HIDE);
 		break;
 	case '=': /* DECPAM -- Application keypad */
 		xsetmode(1, MODE_APPKEYPAD);
@@ -2467,8 +2365,7 @@ tputc(Rune u)
 	Glyph *gp;
 
 	control = ISCONTROL(u);
-	if (u < 127 || !IS_SET(MODE_UTF8))
-	{
+	if (u < 127 || !IS_SET(MODE_UTF8)) {
 		c[0] = u;
 		width = len = 1;
 	} else {
@@ -2493,7 +2390,6 @@ tputc(Rune u)
 			term.esc |= ESC_STR_END;
 			goto check_control_code;
 		}
-
 
 		if (strescseq.len+len >= strescseq.siz) {
 			/*
@@ -2582,7 +2478,10 @@ check_control_code:
 	}
 
 	if (term.c.x+width > term.col) {
-		tnewline(1);
+		if (IS_SET(MODE_WRAP))
+			tnewline(1);
+		else
+			tmoveto(term.col - width, term.c.y);
 		gp = &term.line[term.c.y][term.c.x];
 	}
 
@@ -2614,10 +2513,8 @@ twrite(const char *buf, int buflen, int show_ctrl)
 	Rune u;
 	int n;
 
-
 	for (n = 0; n < buflen; n += charsize) {
-		if (IS_SET(MODE_UTF8))
-		{
+		if (IS_SET(MODE_UTF8)) {
 			/* process a complete utf8 char */
 			charsize = utf8decode(buf + n, &u, buflen - n);
 			if (charsize == 0)
@@ -2645,19 +2542,16 @@ void
 tresize(int col, int row)
 {
 	int i;
-	int j;
 	int minrow = MIN(row, term.row);
 	int mincol = MIN(col, term.col);
 	int *bp;
 	TCursor c;
-
 
 	if (col < 1 || row < 1) {
 		fprintf(stderr,
 		        "tresize: error resizing to %dx%d\n", col, row);
 		return;
 	}
-
 
 	/*
 	 * slide screen to keep cursor where we expect it -
@@ -2684,13 +2578,6 @@ tresize(int col, int row)
 	term.dirty = xrealloc(term.dirty, row * sizeof(*term.dirty));
 	term.tabs = xrealloc(term.tabs, col * sizeof(*term.tabs));
 
-	Glyph gc=(Glyph){.bg=term.c.attr.bg, .fg=term.c.attr.fg, .u=' ', .mode=0};
-	for (i = 0; i < HISTSIZE; i++) {
-		term.hist[i] = xrealloc(term.hist[i], col * sizeof(Glyph));
-		for (j = mincol; j < col; j++)
-			term.hist[i][j] = gc;
-	}
-
 	/* resize each row to new width, zero-pad if needed */
 	for (i = 0; i < minrow; i++) {
 		term.line[i] = xrealloc(term.line[i], col * sizeof(Glyph));
@@ -2702,11 +2589,10 @@ tresize(int col, int row)
 		term.line[i] = xmalloc(col * sizeof(Glyph));
 		term.alt[i] = xmalloc(col * sizeof(Glyph));
 	}
-	if (col > term.col)
-	{
+	if (col > term.col) {
 		bp = term.tabs + term.col;
-		memset(bp, 0, sizeof(*term.tabs) * (col - term.col));
 
+		memset(bp, 0, sizeof(*term.tabs) * (col - term.col));
 		while (--bp > term.tabs && !*bp)
 			/* nothing */ ;
 		for (bp += tabspaces; bp < term.tabs + col; bp += tabspaces)
@@ -2750,11 +2636,9 @@ drawregion(int x1, int y1, int x2, int y2)
 			continue;
 
 		term.dirty[y] = 0;
-		xdrawline(TLINE(y), x1, y, x2);
+		xdrawline(term.line[y], x1, y, x2);
 	}
 }
-
-#include "patch/st_include.c"
 
 void
 draw(void)
@@ -2772,13 +2656,9 @@ draw(void)
 	if (term.line[term.c.y][cx].mode & ATTR_WDUMMY)
 		cx--;
 
-
 	drawregion(0, 0, term.col, term.row);
-
-	if (term.scr == 0)
 	xdrawcursor(cx, term.c.y, term.line[term.c.y][cx],
-			term.ocx, term.ocy, term.line[term.ocy][term.ocx],
-			term.line[term.ocy], term.col);
+			term.ocx, term.ocy, term.line[term.ocy][term.ocx]);
 	term.ocx = cx;
 	term.ocy = term.c.y;
 	xfinishdraw();

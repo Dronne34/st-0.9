@@ -67,7 +67,6 @@ int allowwindowops = 0;
 static double minlatency = 8;
 static double maxlatency = 33;
 
-
 /*
  * blinking timeout (set to 0 to disable blinking) for the terminal blinking
  * attribute.
@@ -78,7 +77,6 @@ static unsigned int blinktimeout = 800;
  * thickness of underline and bar cursors
  */
 static unsigned int cursorthickness = 2;
-
 
 /*
  * bell volume. It must be a value between -100 and 100. Use 0 for disabling
@@ -108,89 +106,57 @@ unsigned int tabspaces = 8;
 
 /* bg opacity */
 float alpha = 0.8;
-typedef struct {
-	const char* const colors[258]; /* terminal colors */
-	unsigned int fg;               /* foreground */
-	unsigned int bg;               /* background */
-	unsigned int cs;               /* cursor */
-	unsigned int rcs;              /* reverse cursor */
-} ColorScheme;
-/*
- * Terminal colors (16 first used in escape sequence,
- * 2 last for custom cursor color),
- * foreground, background, cursor, reverse cursor
- */
-static const ColorScheme schemes[] = {
-	// st (dark)
-	{{"black", "red3", "green3", "yellow3",
-	  "blue2", "magenta3", "cyan3", "gray90",
-	  "gray50", "red", "green", "yellow",
-	  "#5c5cff", "magenta", "cyan", "white",
-	  [256]="#cccccc", "#555555"}, 7, 0, 256, 257},
 
-	// Alacritty (dark)
-	{{"#333B4A", "#cc6666", "#b5bd68", "#f0c674",
-	  "#81a2be", "#b294bb", "#8abeb7", "#c5c8c6",
-	  "#666666", "#d54e53", "#b9ca4a", "#e7c547",
-	  "#7aa6da", "#c397d8", "#70c0b1", "#eaeaea",
-	  [256]="#cccccc", "#555555"}, 7, 0, 256, 257},
+/* Terminal colors (16 first used in escape sequence) */
+static const char *colorname[] = {
+    /* 8 normal colors */
+    [0] = "#252A39", /* black   */
+    [1] = "#ff5555", /* red     */
+    [2] = "#50fa7b", /* green   */
+    [3] = "#f1fa8c", /* yellow  */
+    [4] = "#bd93f9", /* blue    */
+    [5] = "#ff79c6", /* magenta */
+    [6] = "#8be9fd", /* cyan    */
+    [7] = "#bbbbbb", /* white   */
+                                  
+    /* 8 bright colors */
+    [8]  = "#44475a", /* black   */
+    [9]  = "#ff5555", /* red     */
+    [10] = "#50fa7b", /* green   */
+    [11] = "#f1fa8c", /* yellow  */
+    [12] = "#bd93f9", /* blue    */
+    [13] = "#ff79c6", /* magenta */
+    [14] = "#8be9fd", /* cyan    */
+    [15] = "#ffffff", /* white   */
+                                   
+    /* special colors */
+    [256] = "#282a36", /* background */
+    [257] = "#f8f8f2", /* foreground */
 
-	// One Half dark
-	{{"#262B3A", "#e06c75", "#98c379", "#e5c07b",
-	  "#98c379", "#c678dd", "#56b6c2", "#dcdfe4",
-	  "#282c34", "#e06c75", "#98c379", "#e5c07b",
-	  "#61afef", "#c678dd", "#56b6c2", "#dcdfe4",
-	  [256]="#cccccc", "#555555"}, 7, 0, 256, 257},
-
-	// One Half light
-	{{"#fafafa", "#e45649", "#50a14f", "#c18401",
-      "#0184bc", "#a626a4", "#0997b3", "#383a42",
-	  "#fafafa", "#e45649", "#50a14f", "#c18401",
-	  "#0184bc", "#a626a4", "#0997b3", "#383a42",
-	  [256]="#cccccc", "#555555"}, 7, 0, 256, 257},
-
-	// Solarized dark
-	{{"#073642", "#dc322f", "#859900", "#b58900",
-	  "#268bd2", "#d33682", "#2aa198", "#eee8d5",
-	  "#002b36", "#cb4b16", "#586e75", "#657b83",
-	  "#839496", "#6c71c4", "#93a1a1", "#fdf6e3",
-	  [256]="#93a1a1", "#fdf6e3"}, 12, 8, 256, 257},
-
-	// Solarized light
-	{{"#eee8d5", "#dc322f", "#859900", "#b58900",
-	  "#268bd2", "#d33682", "#2aa198", "#073642",
-	  "#fdf6e3", "#cb4b16", "#93a1a1", "#839496",
-	  "#657b83", "#6c71c4", "#586e75", "#002b36",
-	  [256]="#586e75", "#002b36"}, 12, 8, 256, 257},
-
-	// Gruvbox dark
-	{{"#282828", "#cc241d", "#98971a", "#d79921",
-	  "#458588", "#b16286", "#689d6a", "#a89984",
-	  "#928374", "#fb4934", "#b8bb26", "#fabd2f",
-	  "#83a598", "#d3869b", "#8ec07c", "#ebdbb2",
-	  [256]="#ebdbb2", "#555555"}, 15, 0, 256, 257},
-
-	// Gruvbox light
-	{{"#fbf1c7", "#cc241d", "#98971a", "#d79921",
-	  "#458588", "#b16286", "#689d6a", "#7c6f64",
-	  "#928374", "#9d0006", "#79740e", "#b57614",
-	  "#076678", "#8f3f71", "#427b58", "#3c3836",
-	  [256]="#3c3836", "#555555"}, 15, 0, 256, 257},
-
+	/* more colors can be added after 255 to use with DefaultXX */
+	"#cccccc",
+	"#555555",
+	"gray90", /* default foreground colour */
+	"black", /* default background colour */
 };
 
-static const char * const * colorname;
-int colorscheme = 2;
 
 /*
  * Default colors (colorname index)
- * foreground, background, cursor, reverse cursor
+ * foreground, background, cursor
  */
-unsigned int defaultfg;
-unsigned int defaultbg;
-unsigned int defaultcs;
-static unsigned int defaultrcs;
+unsigned int defaultfg = 257;
+unsigned int defaultbg = 256;
+unsigned int defaultcs = 257;
+static unsigned int defaultrcs = 257;
 
+/*
+ * Colors used, when the specific fg == defaultfg. So in reverse mode this
+ * will reverse too. Another logic would only make the simple feature too
+ * complex.
+ */
+unsigned int defaultitalic = 7;
+unsigned int defaultunderline = 7;
 
 /*
  * Default shape of cursor
@@ -198,7 +164,8 @@ static unsigned int defaultrcs;
  * 4: Underline ("_")
  * 6: Bar ("|")
  * 7: Snowman ("☃")
- */static unsigned int cursorshape = 6;
+ */
+static unsigned int cursorshape = 6;
 
 /*
  * Default columns and rows numbers
@@ -220,7 +187,6 @@ static unsigned int mousebg = 0;
  */
 static unsigned int defaultattr = 11;
 
-
 /*
  * Force mouse select/shortcuts while mask is active (when MODE_MOUSE is set).
  * Note that if you want to use ShiftMask with selmasks, set this to an other
@@ -233,59 +199,32 @@ static uint forcemousemod = ShiftMask;
  * Beware that overloading Button1 will disable the selection.
  */
 static MouseShortcut mshortcuts[] = {
-	/* mask                 button   function        argument               release  screen */
+	/* mask                 button   function        argument       release */
 	{ XK_ANY_MOD,           Button2, selpaste,       {.i = 0},      1 },
 	{ ShiftMask,            Button4, ttysend,        {.s = "\033[5;2~"} },
+	{ XK_ANY_MOD,           Button4, ttysend,        {.s = "\031"} },
 	{ ShiftMask,            Button5, ttysend,        {.s = "\033[6;2~"} },
-	{ XK_NO_MOD,            Button4, kscrollup,      {.i = 5},      0, S_PRI },
-	{ XK_NO_MOD,            Button5, kscrolldown,    {.i = 5},      0, S_PRI },
-	{ XK_ANY_MOD,           Button4, ttysend,        {.s = "\031"}, 0, S_ALT },
-	{ XK_ANY_MOD,           Button5, ttysend,        {.s = "\005"}, 0, S_ALT },
+	{ XK_ANY_MOD,           Button5, ttysend,        {.s = "\005"} },
 };
 
 /* Internal keyboard shortcuts. */
 #define MODKEY Mod1Mask
 #define TERMMOD (ControlMask|ShiftMask)
 
-static char *openurlcmd[] = { "/bin/sh", "-c",
-	"xurls | dmenu -l 10 -w $WINDOWID | xargs -r open",
-	"externalpipe", NULL };
-
-static char *setbgcolorcmd[] = { "/bin/sh", "-c",
-	"printf '\033]11;#008000\007'",
-	"externalpipein", NULL };
-
 static Shortcut shortcuts[] = {
-	/* mask                 keysym          function         argument   screen */
-	{ XK_ANY_MOD,           XK_Break,       sendbreak,       {.i =  0} },
-	{ ControlMask,          XK_Print,       toggleprinter,   {.i =  0} },
-	{ ShiftMask,            XK_Print,       printscreen,     {.i =  0} },
-	{ XK_ANY_MOD,           XK_Print,       printsel,        {.i =  0} },
-	{ TERMMOD,              XK_Prior,       zoom,            {.f = +1} },
-	{ TERMMOD,              XK_Next,        zoom,            {.f = -1} },
-	{ TERMMOD,              XK_Home,        zoomreset,       {.f =  0} },
-	{ TERMMOD,              XK_C,           clipcopy,        {.i =  0} },
-	{ TERMMOD,              XK_V,           clippaste,       {.i =  0} },
-	{ TERMMOD,              XK_O,           changealpha,     {.f = +0.05} },
-	{ TERMMOD,              XK_P,           changealpha,     {.f = -0.05} },
-	{ XK_NO_MOD,            XK_F11,         fullscreen,      {.i =  0} },
-	{ MODKEY,               XK_Return,      fullscreen,      {.i =  0} },
-	{ ShiftMask,            XK_Page_Up,     kscrollup,       {.i = -1}, S_PRI },
-	{ ShiftMask,            XK_Page_Down,   kscrolldown,     {.i = -1}, S_PRI },
-	{ TERMMOD,              XK_Y,           selpaste,        {.i =  0} },
-	{ ShiftMask,            XK_Insert,      selpaste,        {.i =  0} },
-	{ TERMMOD,              XK_Num_Lock,    numlock,         {.i =  0} },
-	{ MODKEY,               XK_1,           selectscheme,    {.i =  0} },
-	{ MODKEY,               XK_2,           selectscheme,    {.i =  1} },
-	{ MODKEY,               XK_3,           selectscheme,    {.i =  2} },
-	{ MODKEY,               XK_4,           selectscheme,    {.i =  3} },
-	{ MODKEY,               XK_5,           selectscheme,    {.i =  4} },
-	{ MODKEY,               XK_6,           selectscheme,    {.i =  5} },
-	{ MODKEY,               XK_7,           selectscheme,    {.i =  6} },
-	{ MODKEY,               XK_8,           selectscheme,    {.i =  7} },
-	{ MODKEY,               XK_9,           selectscheme,    {.i =  8} },
-	{ MODKEY,               XK_0,           nextscheme,      {.i = +1} },
-	{ MODKEY|ControlMask,   XK_0,           nextscheme,      {.i = -1} },
+	/* mask                 keysym          function        argument */
+	{ XK_ANY_MOD,           XK_Break,       sendbreak,      {.i =  0} },
+	{ ControlMask,          XK_Print,       toggleprinter,  {.i =  0} },
+	{ ShiftMask,            XK_Print,       printscreen,    {.i =  0} },
+	{ XK_ANY_MOD,           XK_Print,       printsel,       {.i =  0} },
+	{ TERMMOD,              XK_Prior,       zoom,           {.f = +1} },
+	{ TERMMOD,              XK_Next,        zoom,           {.f = -1} },
+	{ TERMMOD,              XK_Home,        zoomreset,      {.f =  0} },
+	{ TERMMOD,              XK_C,           clipcopy,       {.i =  0} },
+	{ TERMMOD,              XK_V,           clippaste,      {.i =  0} },
+	{ TERMMOD,              XK_Y,           selpaste,       {.i =  0} },
+	{ ShiftMask,            XK_Insert,      selpaste,       {.i =  0} },
+	{ TERMMOD,              XK_Num_Lock,    numlock,        {.i =  0} },
 };
 
 /*
@@ -363,7 +302,7 @@ static Key key[] = {
 	{ XK_KP_Delete,     ControlMask,    "\033[3;5~",    +1,    0},
 	{ XK_KP_Delete,     ShiftMask,      "\033[2K",      -1,    0},
 	{ XK_KP_Delete,     ShiftMask,      "\033[3;2~",    +1,    0},
-	{ XK_KP_Delete,     XK_ANY_MOD,     "\033[3~",      -1,    0},
+	{ XK_KP_Delete,     XK_ANY_MOD,     "\033[P",       -1,    0},
 	{ XK_KP_Delete,     XK_ANY_MOD,     "\033[3~",      +1,    0},
 	{ XK_KP_Multiply,   XK_ANY_MOD,     "\033Oj",       +2,    0},
 	{ XK_KP_Add,        XK_ANY_MOD,     "\033Ok",       +2,    0},
@@ -431,7 +370,7 @@ static Key key[] = {
 	{ XK_Delete,        ControlMask,    "\033[3;5~",    +1,    0},
 	{ XK_Delete,        ShiftMask,      "\033[2K",      -1,    0},
 	{ XK_Delete,        ShiftMask,      "\033[3;2~",    +1,    0},
-	{ XK_Delete,        XK_ANY_MOD,     "\033[3~",      -1,    0},
+	{ XK_Delete,        XK_ANY_MOD,     "\033[P",       -1,    0},
 	{ XK_Delete,        XK_ANY_MOD,     "\033[3~",      +1,    0},
 	{ XK_BackSpace,     XK_NO_MOD,      "\177",          0,    0},
 	{ XK_BackSpace,     Mod1Mask,       "\033\177",      0,    0},
@@ -557,5 +496,3 @@ static char ascii_printable[] =
 	" !\"#$%&'()*+,-./0123456789:;<=>?"
 	"@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_"
 	"`abcdefghijklmnopqrstuvwxyz{|}~";
-
-
