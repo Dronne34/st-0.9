@@ -9,7 +9,7 @@ static char *font = "Hack:pixelsize=15:antialias=true:autohint=true";
 /* Spare fonts */
 static char *font2[] = {
 /*	"Inconsolata for Powerline:pixelsize=12:antialias=true:autohint=true", */
-	"Hack Nerd Font Mono:pixelsize=15:antialias=true:autohint=true",
+	"Hack Nerd Font:pixelsize=15:antialias=true:autohint=true",
 };
 
 
@@ -170,8 +170,8 @@ static unsigned int cursorshape = 6;
  * Default columns and rows numbers
  */
 
-static unsigned int cols = 80;
-static unsigned int rows = 24;
+static unsigned int cols = 120;
+static unsigned int rows = 40;
 
 /*
  * Default colour and shape of the mouse cursor
