@@ -1,2 +1,0 @@
-/* Patches */
-#include "externalpipe.c"

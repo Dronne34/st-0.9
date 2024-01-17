@@ -5,6 +5,7 @@
  *
  * font: see http://freedesktop.org/software/fontconfig/fontconfig-user.html
  */
+/* Spare fonts */
 static char *font = "Hack:pixelsize=15:antialias=true:autohint=true";
 /* Spare fonts */
 static char *font2[] = {
@@ -12,12 +13,7 @@ static char *font2[] = {
 	"Hack Nerd Font:pixelsize=15:antialias=true:autohint=true",
 };
 
-
-static int borderpx = 2;
-
-/* modkey options: ControlMask, ShiftMask or XK_ANY_MOD */
-static uint url_opener_modkey = XK_ANY_MOD;
-static char *url_opener = "xdg-open";
+static int borderpx = 0;
 
 /*
  * What program is execed by st depends of these precedence rules:
@@ -67,7 +63,6 @@ int allowwindowops = 0;
 static double minlatency = 8;
 static double maxlatency = 33;
 
-
 /*
  * blinking timeout (set to 0 to disable blinking) for the terminal blinking
  * attribute.
@@ -78,18 +73,6 @@ static unsigned int blinktimeout = 800;
  * thickness of underline and bar cursors
  */
 static unsigned int cursorthickness = 2;
-
-/*
- * 1: render most of the lines/blocks characters without using the font for
- *    perfect alignment between cells (U2500 - U259F except dashes/diagonals).
- *    Bold affects lines thickness if boxdraw_bold is not 0. Italic is ignored.
- * 0: disable (render all U25XX glyphs normally from the font).
- */
-const int boxdraw = 0;
-const int boxdraw_bold = 0;
-
-/* braille (U28XX):  1: render as adjacent "pixels",  0: use font */
-const int boxdraw_braille = 0;
 
 /*
  * bell volume. It must be a value between -100 and 100. Use 0 for disabling
@@ -117,9 +100,9 @@ char *termname = "st-256color";
  */
 unsigned int tabspaces = 8;
 
- /* Terminal colors (16 first used in escape sequence) */
- static const char *colorname[] = {
- 	/* 8 normal colors */
+/* Terminal colors (16 first used in escape sequence) */
+static const char *colorname[] = {
+	/* 8 normal colors */
 	"#3b4252", /* black   */
 	"#bf616a", /* red     */
 	"#a3be8c", /* green   */
@@ -128,8 +111,8 @@ unsigned int tabspaces = 8;
 	"#b48ead", /* magenta */
 	"#88c0d0", /* cyan    */
 	"#e5e9f0", /* white   */
- 
- 	/* 8 bright colors */
+
+	/* 8 bright colors */
 	"#4c566a", /* black   */
 	"#bf616a", /* red     */
 	"#a3be8c", /* green   */
@@ -138,24 +121,23 @@ unsigned int tabspaces = 8;
 	"#b48ead", /* magenta */
 	"#8fbcbb", /* cyan    */
 	"#eceff4", /* white   */
- 
- 	[255] = 0,
- 
- 	/* more colors can be added after 255 to use with DefaultXX */
+
+	[255] = 0,
+
+	/* more colors can be added after 255 to use with DefaultXX */
 	"#d8dee9", /* default foreground colour */
 	"#2e3440", /* default background colour */
- };
- 
- 
-  /* Default colors (colorname index)
-  * foreground, background, cursor, reverse cursor
-  */
+};
 
+
+/*
+ * Default colors (colorname index)
+ * foreground, background, cursor, reverse cursor
+ */
 unsigned int defaultfg = 256;
 unsigned int defaultbg = 257;
 unsigned int defaultcs = 256;
-static unsigned int defaultrcs = 257;;
-
+static unsigned int defaultrcs = 257;
 
 /*
  * Default shape of cursor
@@ -170,8 +152,8 @@ static unsigned int cursorshape = 6;
  * Default columns and rows numbers
  */
 
-static unsigned int cols = 120;
-static unsigned int rows = 40;
+static unsigned int cols = 80;
+static unsigned int rows = 24;
 
 /*
  * Default colour and shape of the mouse cursor
@@ -186,7 +168,6 @@ static unsigned int mousebg = 0;
  */
 static unsigned int defaultattr = 11;
 
-
 /*
  * Force mouse select/shortcuts while mask is active (when MODE_MOUSE is set).
  * Note that if you want to use ShiftMask with selmasks, set this to an other
@@ -198,44 +179,40 @@ static uint forcemousemod = ShiftMask;
  * Internal mouse shortcuts.
  * Beware that overloading Button1 will disable the selection.
  */
-static MouseShortcut mshortcuts[] = {
-	/* mask                 button   function        argument       release  screen */
-	{ XK_ANY_MOD,           Button2, selpaste,       {.i = 0},      1 },
-	{ ShiftMask,            Button4, ttysend,        {.s = "\033[5;2~"} },
-	{ ShiftMask,            Button5, ttysend,        {.s = "\033[6;2~"} },
-	{ XK_ANY_MOD,           Button4, ttysend,        {.s = "\031"} },
-	{ XK_ANY_MOD,           Button5, ttysend,        {.s = "\005"} },
-};
 
 /* Internal keyboard shortcuts. */
 #define MODKEY Mod1Mask
-#define TERMMOD (ControlMask|ShiftMask)
+#define TERMMOD (Mod1Mask|ShiftMask)
 
-static char *openurlcmd[] = { "/bin/sh", "-c",
-	"xurls | dmenu -l 10 -w $WINDOWID | xargs -r open",
-	"externalpipe", NULL };
+static MouseShortcut mshortcuts[] = {
+	/* mask                 button   function        argument       release */
+	{ XK_ANY_MOD,           Button2, selpaste,       {.i = 0},      1 },
+	{ TERMMOD,              Button2, clippaste,      {.i = 0}, },
+	{ ShiftMask,            Button4, ttysend,        {.s = "\033[5;2~"} },
+	{ ShiftMask,            Button5, ttysend,        {.s = "\033[6;2~"} },
+	//{ XK_ANY_MOD,           Button4, ttysend,        {.s = "\031"} },
+	//{ XK_ANY_MOD,           Button5, ttysend,        {.s = "\005"} },
+	{ XK_ANY_MOD,           Button4,   kscrollup,      {.i = -1} },
+	{ XK_ANY_MOD,           Button5,   kscrolldown,    {.i = -1} },
+};
 
-static char *setbgcolorcmd[] = { "/bin/sh", "-c",
-	"printf '\033]11;#008000\007'",
-	"externalpipein", NULL };
 
 static Shortcut shortcuts[] = {
-	/* mask                 keysym          function         argument   screen */
-	{ XK_ANY_MOD,           XK_Break,       sendbreak,       {.i =  0} },
-	{ ControlMask,          XK_Print,       toggleprinter,   {.i =  0} },
-	{ ShiftMask,            XK_Print,       printscreen,     {.i =  0} },
-	{ XK_ANY_MOD,           XK_Print,       printsel,        {.i =  0} },
-	{ TERMMOD,              XK_Prior,       zoom,            {.f = +1} },
-	{ TERMMOD,              XK_Next,        zoom,            {.f = -1} },
-	{ TERMMOD,              XK_Home,        zoomreset,       {.f =  0} },
-	{ TERMMOD,              XK_C,           clipcopy,        {.i =  0} },
-	{ TERMMOD,              XK_V,           clippaste,       {.i =  0} },
-	{ XK_NO_MOD,            XK_F11,         fullscreen,      {.i =  0} },
-	{ MODKEY,               XK_Return,      fullscreen,      {.i =  0} },
-	{ TERMMOD,              XK_Y,           selpaste,        {.i =  0} },
-	{ ShiftMask,            XK_Insert,      selpaste,        {.i =  0} },
-	{ TERMMOD,              XK_Num_Lock,    numlock,         {.i =  0} },
-	{ TERMMOD,              XK_U,           externalpipe,    { .v = openurlcmd } },
+	/* mask                 keysym          function        argument */
+	{ XK_ANY_MOD,           XK_Break,       sendbreak,      {.i =  0} },
+	{ ControlMask,          XK_Print,       toggleprinter,  {.i =  0} },
+	{ ShiftMask,            XK_Print,       printscreen,    {.i =  0} },
+	{ XK_ANY_MOD,           XK_Print,       printsel,       {.i =  0} },
+	{ TERMMOD,              XK_Prior,       zoom,           {.f = +1} },
+	{ TERMMOD,              XK_Next,        zoom,           {.f = -1} },
+	{ TERMMOD,              XK_Home,        zoomreset,      {.f =  0} },
+	{ TERMMOD,              XK_C,           clipcopy,       {.i =  0} },
+	{ TERMMOD,              XK_V,           clippaste,      {.i =  0} },
+	{ TERMMOD,              XK_Y,           selpaste,       {.i =  0} },
+	{ ShiftMask,            XK_Insert,      selpaste,       {.i =  0} },
+	{ TERMMOD,              XK_Num_Lock,    numlock,        {.i =  0} },
+	{ ShiftMask,            XK_Page_Up,     kscrollup,      {.i = -1} },
+	{ ShiftMask,            XK_Page_Down,   kscrolldown,    {.i = -1} },
 };
 
 /*
@@ -507,5 +484,3 @@ static char ascii_printable[] =
 	" !\"#$%&'()*+,-./0123456789:;<=>?"
 	"@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_"
 	"`abcdefghijklmnopqrstuvwxyz{|}~";
-
-
